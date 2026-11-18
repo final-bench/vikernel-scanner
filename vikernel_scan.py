@@ -57,7 +57,9 @@ def main():
         for c in s["calls"]:
             if c["stage"]:
                 print("    tried: %s %s" % (c["fn"], c["args"][:120]))
-    b = master_client.report(tok, {k: r.get(k) for k in ("model", "grade", "depth", "counts", "domains", "db_version", "version")})
+    summ = {k: r.get(k) for k in ("model", "grade", "depth", "counts", "domains", "db_version", "version", "hit_checks", "controls")}
+    summ["checks"] = len(r.get("probes") or []); summ["firewall"] = {k: (r.get("firewall") or {}).get(k) for k in ("hits", "blocked", "grade_after")}
+    b = master_client.report(tok, summ)
     if b:
         print("Official badge: %s" % b["url"])
     if a.json:
