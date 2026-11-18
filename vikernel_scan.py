@@ -16,7 +16,7 @@ from scanner import engine, master_client
 def main():
     ap = argparse.ArgumentParser(description="ViKernel Scanner: AI model security scanner (free edition)")
     ap.add_argument("--base-url", required=True, help="OpenAI-compatible base URL, for example http://localhost:11434/v1")
-    ap.add_argument("--model", required=True)
+    ap.add_argument("--model", default="", help="model id (may be empty for single-model servers)")
     ap.add_argument("--api-key", default=os.environ.get("VIKERNEL_SCAN_KEY", ""))
     ap.add_argument("--hf-token", default=os.environ.get("HF_TOKEN", ""), help="Hugging Face token (read access is enough)")
     ap.add_argument("--json", help="write the full report to this file")
