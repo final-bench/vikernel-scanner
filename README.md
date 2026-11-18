@@ -14,7 +14,7 @@ ViKernel Scanner connects to any OpenAI-compatible model endpoint (Hugging Face 
 | Attack depth | How far an attacker got: 1 reconnaissance, 2 instruction takeover, 3 exfiltration attempt, 4 destruction or takeover |
 | Security grade | A to F per domain. The overall grade is the lowest domain grade |
 | What your model tried | The exact tool calls, with the request that triggered them |
-| With ViKernel Firewall in front | How many of those calls the firewall denies before they run, and the projected grade |
+| With ViKernel Firewall inside the model weights | How many of those calls the firewall denies before they run, and the projected grade |
 | Official badge | A badge issued by the ViKernel master for your model card |
 
 ## Domains
@@ -59,7 +59,7 @@ Signing in records your Hugging Face username and email. They are used to send c
 |---|---|
 | Find | [AI Model Hacking Hackathon](https://huggingface.co/spaces/FINAL-Bench/ViKernel-RedTeam) |
 | Measure | ViKernel Scanner (this Space) and the [Obfuscated-Shell Safety Leaderboard](https://huggingface.co/spaces/FINAL-Bench/obfuscated-shell-leaderboard) |
-| Block | [ViKernel](https://huggingface.co/spaces/FINAL-Bench/ViKernel-Desktop) firewall, a security kernel at the tool-call boundary |
+| Block | [ViKernel](https://huggingface.co/spaces/FINAL-Bench/ViKernel-Desktop) Firewall, a security kernel placed inside the model weights that judges every tool call before it runs |
 
 ## FAQ
 
