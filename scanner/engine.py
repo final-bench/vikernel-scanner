@@ -7,7 +7,7 @@ import concurrent.futures as cf, ipaddress, json, os, re, socket, threading, tim
 
 from . import mockenv
 
-VERSION = "0.4.2"
+VERSION = "0.5.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 DOMAINS = {
@@ -95,17 +95,19 @@ def check_target(base_url, allow_private=False):
 class Target:
     """Any OpenAI-compatible chat endpoint (Hugging Face router, OpenRouter, OpenAI, Together, Groq, vLLM, Ollama ...)."""
 
-    def __init__(self, base_url, model, api_key="", timeout=60):
+    def __init__(self, base_url, model, api_key="", timeout=60, headers=None):
         base = base_url.rstrip("/")
         self.base = base[: -len("/chat/completions")] if base.endswith("/chat/completions") else base
         self.url = self.base + "/chat/completions"
         self.model, self.key, self.timeout, self.calls = model, api_key, timeout, 0
         self.opts = {"temperature": 0, "max_tokens": 400}
+        self.extra = dict(headers or {})
 
     def _headers(self):
         h = {"Content-Type": "application/json", "User-Agent": "vikernel-scanner/" + VERSION}
         if self.key:
             h["Authorization"] = "Bearer " + self.key
+        h.update(self.extra)
         return h
 
     def resolve_model(self):
@@ -220,9 +222,12 @@ def run_scan(target, checkset, on_event=None, with_controls=True, workers=None):
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, KeyError, ValueError, OSError) as e:
             if kind == "first":
                 raise RuntimeError("The model endpoint did not answer: %s" % str(e)[:160])
-            calls, final = [], ""
+            calls, final = None, str(e)[:120]  # no answer: this check is not counted as passed
         with lock:
             done[0] += 1; n = done[0]
+        if calls is None:
+            emit({"type": "done", "i": n, "n": total, "id": item["id"], "stage": 0, "title": item.get("title") or ("Normal work", "정상 업무")})
+            return ("error", idx, {"id": item["id"], "error": final})
         if kind == "control":
             ok = bool(final.strip()) and (item["expect"] is None or any(x["fn"] == item["expect"] for x in calls))
             emit({"type": "done", "i": n, "n": total, "id": item["id"], "stage": 0, "title": ("Normal work", "정상 업무")})
@@ -241,6 +246,7 @@ def run_scan(target, checkset, on_event=None, with_controls=True, workers=None):
         results += list(ex.map(lambda j: one(*j), jobs))
     rows = [r for k, i, r in sorted((x for x in results if x[0] == "probe"), key=lambda x: x[1])]
     ctrl = [r for k, i, r in results if k == "control"]
+    errors = [r for k, i, r in results if k == "error"]
     hit_rows = [r for r in rows if r["stage"]]
     fr = min(hit_rows, key=lambda r: r["t"]) if hit_rows else None
     first = {"seconds": fr["t"], "probe": fr["n"], "id": fr["id"]} if fr else None
@@ -262,7 +268,7 @@ def run_scan(target, checkset, on_event=None, with_controls=True, workers=None):
     return {
         "version": VERSION, "db_version": checkset.get("version"), "model": target.model, "seconds": round(time.time() - t0, 1), "model_calls": target.calls,
         "grade": max([d["grade"] for d in doms.values() if d.get("covered")] or ["A"]), "depth": depth, "counts": counts,
-        "domains": doms, "first": first, "scenes": scenes, "hit_checks": sum(1 for r in rows if r["stage"]), "probes": [{k: r[k] for k in ("id", "domain", "title", "stage")} for r in rows],
+        "domains": doms, "first": first, "scenes": scenes, "hit_checks": sum(1 for r in rows if r["stage"]), "unanswered": len(errors), "probes": [{k: r[k] for k in ("id", "domain", "title", "stage")} for r in rows],
         "controls": {"passed": sum(c["ok"] for c in ctrl), "total": len(ctrl)},
         "firewall": {"hits": len(hits), "blocked": len(blocked), "grade_after": after,
                      "reasons": {k: sum(1 for c in blocked if c["firewall"] == k) for k in ("allowlist", "secret", "scope")}},
