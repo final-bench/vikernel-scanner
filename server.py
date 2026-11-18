@@ -6,7 +6,7 @@ The model's API key is used only for that scan. It stays in memory and is never 
 import html, json, os, secrets, threading, time, urllib.parse, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import auth
+import auth, history
 from scanner import engine, master, master_client
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -46,7 +46,7 @@ def badge_svg(rec):
         w1 + w2, label, val, w1 + w2, w1, w2, col, w1, col, w1 // 2, html.escape(label), w1 + w2 // 2, html.escape(val))
 
 
-def run_job(jid, token, base_url, model, key):
+def run_job(jid, token, base_url, model, key, user=None):
     job = JOBS[jid]
     try:
         engine.check_target(base_url, allow_private=ALLOW_PRIVATE)
@@ -60,6 +60,8 @@ def run_job(jid, token, base_url, model, key):
         rep = engine.run_scan(target, checkset, on_event)
         rep["badge"] = master_client.report(token, {k: rep.get(k) for k in ("model", "grade", "depth", "counts", "domains", "db_version", "version")})
         job["report"] = rep; job["status"] = "done"
+        if user:
+            history.save(user, jid, rep)
     except Exception as e:  # noqa: BLE001
         msg = str(e)[:240]
         if "402" in msg:
@@ -111,6 +113,14 @@ class H(BaseHTTPRequestHandler):
         if p == "/api/me":
             s = auth.session(self.headers)
             return self._send(200, {"user": s["user"] if s else None, "email": s["email"] if s else None, "signin": auth.available()})
+        if p == "/api/history" or p.startswith("/api/history/"):
+            s = auth.session(self.headers)
+            if not s:
+                return self._send(401, {"error": "Sign in with Hugging Face first.", "login": True})
+            if p == "/api/history":
+                return self._send(200, {"scans": history.list_for(s["user"]), **history.where()})
+            r = history.get(s["user"], p.rsplit("/", 1)[1])
+            return self._send(200, r) if r else self._send(404, {"error": "not found"})
         if p == "/api/info":
             return self._send(200, {"version": engine.VERSION, "master": master_client.MASTER_URL, "is_master": master.ENABLED,
                                     "domains": {k: {"en": v[0], "ko": v[1]} for k, v in engine.DOMAINS.items()}, "causes": causes()})
@@ -161,7 +171,7 @@ class H(BaseHTTPRequestHandler):
             h.append(now); HITS[ip] = h
             jid = secrets.token_urlsafe(12)
             JOBS[jid] = {"status": "running", "events": [], "progress": (0, 1), "started": now}
-        threading.Thread(target=run_job, args=(jid, s["token"], base, model, key), daemon=True).start()
+        threading.Thread(target=run_job, args=(jid, s["token"], base, model, key, s["user"]), daemon=True).start()
         self._send(200, {"id": jid})
 
     def log_message(self, *a):
