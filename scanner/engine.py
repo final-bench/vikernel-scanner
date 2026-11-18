@@ -7,7 +7,7 @@ import ipaddress, json, os, re, socket, time, urllib.error, urllib.parse, urllib
 
 from . import mockenv
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 DOMAINS = {
@@ -93,18 +93,54 @@ def check_target(base_url, allow_private=False):
 
 
 class Target:
-    def __init__(self, base_url, model, api_key="", timeout=60):
-        self.url = base_url.rstrip("/") + ("" if base_url.rstrip("/").endswith("/chat/completions") else "/chat/completions")
-        self.model, self.key, self.timeout, self.calls = model, api_key, timeout, 0
+    """Any OpenAI-compatible chat endpoint (Hugging Face router, OpenRouter, OpenAI, Together, Groq, vLLM, Ollama ...)."""
 
-    def chat(self, messages):
-        body = {"model": self.model, "messages": messages, "temperature": 0, "max_tokens": 400}
+    def __init__(self, base_url, model, api_key="", timeout=60):
+        base = base_url.rstrip("/")
+        self.base = base[: -len("/chat/completions")] if base.endswith("/chat/completions") else base
+        self.url = self.base + "/chat/completions"
+        self.model, self.key, self.timeout, self.calls = model, api_key, timeout, 0
+        self.opts = {"temperature": 0, "max_tokens": 400}
+
+    def _headers(self):
         h = {"Content-Type": "application/json", "User-Agent": "vikernel-scanner/" + VERSION}
         if self.key:
             h["Authorization"] = "Bearer " + self.key
-        req = urllib.request.Request(self.url, data=json.dumps(body).encode(), headers=h)
+        return h
+
+    def resolve_model(self):
+        """No model name given: use the first model the endpoint lists (single-model servers such as vLLM or llama.cpp)."""
+        if self.model:
+            return self.model
+        req = urllib.request.Request(self.base + "/models", headers=self._headers())
         with urllib.request.urlopen(req, timeout=self.timeout) as r:
-            out = json.loads(r.read())
+            data = json.loads(r.read()).get("data") or []
+        if len(data) != 1:  # many models behind this endpoint: the user has to say which one
+            raise ValueError("This endpoint serves %d models. Enter the model name." % len(data))
+        self.model = data[0].get("id", "")
+        return self.model
+
+    def chat(self, messages):
+        for _ in range(3):
+            body = {"model": self.model, "messages": messages, **self.opts}
+            req = urllib.request.Request(self.url, data=json.dumps(body).encode(), headers=self._headers())
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                    out = json.loads(r.read())
+                break
+            except urllib.error.HTTPError as e:
+                if e.code != 400:
+                    raise
+                msg = e.read().decode("utf-8", "replace")[:600].lower()
+                # some providers want max_completion_tokens, or allow only the default temperature
+                if "max_tokens" in msg and "max_tokens" in self.opts:
+                    self.opts.pop("max_tokens"); self.opts["max_completion_tokens"] = 400
+                elif "temperature" in msg and "temperature" in self.opts:
+                    self.opts.pop("temperature")
+                else:
+                    raise urllib.error.HTTPError(e.url, 400, "Bad Request: " + msg[:160], e.headers, None)
+        else:
+            raise ValueError("The endpoint rejected the request format.")
         self.calls += 1
         return out["choices"][0]["message"].get("content") or ""
 
@@ -169,6 +205,7 @@ def grade(report_probes):
 def run_scan(target, checkset, on_event=None, with_controls=True):
     t0 = time.time()
     emit = on_event or (lambda e: None)
+    target.resolve_model()
     P = probes(checkset)
     CONTROLS = checkset.get("controls", []) if with_controls else []
     total = len(P) + len(CONTROLS)
