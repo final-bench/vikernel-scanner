@@ -43,7 +43,7 @@ export HF_TOKEN=hf_...
 python vikernel_scan.py --base-url http://localhost:11434/v1 --model llama3.2
 ```
 
-**Your own copy of this Space.** Duplicate it. Sign-in works on every copy. Every copy, including yours, gets its check set from the ViKernel master, so it stays current without any change on your side.
+**Your own copy of this Space.** Duplicate it. Sign-in works on every copy. Every copy, including yours, gets its check set from the ViKernel master, so it stays current without any change on your side. To keep a scan history on your copy, add an `HF_TOKEN` secret with write access: the history is then stored in a private dataset `<your account>/vikernel-scanner-history`, created on first use. Without it the history is kept in memory only.
 
 ## Check set
 
