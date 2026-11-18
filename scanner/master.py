@@ -12,6 +12,8 @@ ENABLED = os.environ.get("VIKERNEL_MASTER") == "1" and bool(os.environ.get("HF_T
 DB_REPO = os.environ.get("VIKERNEL_DB_REPO", "FINAL-Bench/vikernel-scanner-db")
 BADGE_KEY = (os.environ.get("BADGE_KEY") or secrets.token_hex(16)).encode()
 PER_USER_HOUR = int(os.environ.get("MASTER_CHECKS_PER_HOUR", "30"))
+REFERENCE_USERS = {u.strip().lower() for u in os.environ.get("REFERENCE_USERS", "SeaWolf-AI,FINAL-Bench").split(",")}
+_board = {"t": 0}
 if ENABLED:  # import once, here: importing it first inside the flush thread races with the main thread
     from huggingface_hub import CommitOperationAdd, HfApi, hf_hub_download
 
@@ -125,6 +127,8 @@ def _gate(token, host, version):
 
 def handle(path, token, host, version, body=None):
     """Returns a JSON-able dict. Raises Refuse(code, message)."""
+    if path == "/api/master/board":  # public
+        return board()
     if path == "/api/master/catalog":  # public: what is checked, without the check text
         db = _load_db(); cs = db["free"]
         pol = db["policy"]
@@ -142,7 +146,9 @@ def handle(path, token, host, version, body=None):
         day = time.strftime("%Y-%m-%d", time.gmtime())
         rec = {"id": bid, "user": idn["user"], "host": host, "client": version, "date": day, "model": str(b.get("model", ""))[:120],
                "grade": str(b.get("grade", "?"))[:1], "depth": b.get("depth"), "counts": b.get("counts"), "db_version": b.get("db_version"),
-               "domains": {k: (v or {}).get("grade") for k, v in (b.get("domains") or {}).items()}}
+               "domains": {k: (v or {}).get("grade") for k, v in (b.get("domains") or {}).items()},
+               "hit_checks": b.get("hit_checks"), "checks": b.get("checks"), "controls": b.get("controls"), "firewall": b.get("firewall"),
+               "reference": idn["user"].lower() in REFERENCE_USERS}
         rec["sig"] = hmac.new(BADGE_KEY, json.dumps([bid, rec["model"], rec["grade"], day]).encode(), hashlib.sha256).hexdigest()[:24]
         _badges[bid] = rec
         _queue("scans/%s/%s.json" % (day, bid), rec)
@@ -151,6 +157,39 @@ def handle(path, token, host, version, body=None):
             u["scans"] = int(u.get("scans", 0)) + 1; _queue("users/%s.json" % idn["user"], u)
         return {"badge": {"id": bid, "grade": rec["grade"], "url": "https://final-bench-vikernel-scanner.hf.space/badge/%s.svg" % bid}}
     raise Refuse(404, "not found")
+
+
+def flush_now():
+    """Write pending records at once (used by batch runs that exit right after)."""
+    with _lock:
+        ops = dict(_pending); _pending.clear()
+    if ops:
+        _api().create_commit(DB_REPO, [CommitOperationAdd(p, b) for p, b in ops.items()], commit_message="scanner activity", repo_type="dataset")
+
+
+def board():
+    """Public results: the latest scan of each model. No account names or emails, only whether it is a VIDRAFT reference scan."""
+    if time.time() - _board["t"] < 300:
+        return _board["v"]
+    recs = list(_badges.values())
+    try:
+        have = {r["id"] for r in recs}
+        files = sorted((f for f in _api().list_repo_files(DB_REPO, repo_type="dataset") if f.startswith("scans/") and f.endswith(".json")), reverse=True)[:400]
+        for f in files:
+            bid = f.rsplit("/", 1)[1][:-5]
+            if bid not in have:
+                r = _get(f); _badges[bid] = r; recs.append(r); have.add(bid)
+    except Exception:  # noqa: BLE001
+        pass
+    latest = {}
+    for r in sorted(recs, key=lambda r: (r.get("date", ""), r.get("id", ""))):
+        if r.get("model") and r.get("checks"):
+            latest[r["model"]] = r
+    keep = ("id", "model", "grade", "depth", "domains", "hit_checks", "checks", "controls", "date", "reference", "db_version", "firewall")
+    v = {"models": sorted(({k: r.get(k) for k in keep} for r in latest.values()), key=lambda r: ("ABCDF".find(r.get("grade") or "F"), r.get("hit_checks") or 0)),
+         "scans": len(recs)}
+    _board.update(v=v, t=time.time())
+    return v
 
 
 def badge(bid):
