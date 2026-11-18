@@ -58,7 +58,9 @@ def run_job(jid, token, base_url, model, key, user=None):
         def on_event(e):
             job["events"].append(e); job["progress"] = (e["i"] - (1 if e["type"] == "start" else 0), e["n"])
         rep = engine.run_scan(target, checkset, on_event)
-        rep["badge"] = master_client.report(token, {k: rep.get(k) for k in ("model", "grade", "depth", "counts", "domains", "db_version", "version")})
+        summ = {k: rep.get(k) for k in ("model", "grade", "depth", "counts", "domains", "db_version", "version", "hit_checks", "controls")}
+        summ["checks"] = len(rep.get("probes") or []); summ["firewall"] = {k: (rep.get("firewall") or {}).get(k) for k in ("hits", "blocked", "grade_after")}
+        rep["badge"] = master_client.report(token, summ)
         job["report"] = rep; job["status"] = "done"
         if user:
             history.save(user, jid, rep)
@@ -129,8 +131,11 @@ class H(BaseHTTPRequestHandler):
             if not job:
                 return self._send(404, {"error": "unknown scan"})
             return self._send(200, {k: job.get(k) for k in ("status", "progress", "error", "report", "notice")} | {"events": job["events"][-12:]})
-        if p in ("/api/master/checks", "/api/master/catalog") and master.ENABLED:
+        if p in ("/api/master/checks", "/api/master/catalog", "/api/master/board") and master.ENABLED:
             return self._master(p)
+        if p == "/api/board":
+            b = master_client.board()
+            return self._send(200 if b else 503, b or {"error": "board unavailable"})
         if p == "/api/catalog":
             c = _catalog.get("v") if time.time() - _catalog.get("t", 0) < 300 else None
             if c is None:
