@@ -3,7 +3,7 @@
 The access token is kept in server memory for the session only. It is sent to the ViKernel master so the master
 can verify the account; it is never written to disk or logs.
 """
-import base64, json, os, secrets, time, urllib.parse, urllib.request
+import base64, hashlib, hmac, json, os, secrets, time, urllib.parse, urllib.request
 
 PROVIDER = os.environ.get("OPENID_PROVIDER_URL", "https://huggingface.co")
 CLIENT_ID = os.environ.get("OAUTH_CLIENT_ID", "")
@@ -17,12 +17,27 @@ def available():
     return bool(CLIENT_ID and CLIENT_SECRET and HOST)
 
 
+_KEY = (os.environ.get("BADGE_KEY") or CLIENT_SECRET or secrets.token_hex(16)).encode()
+
+
+def _state():
+    t = str(int(time.time())) + "." + secrets.token_hex(6)
+    return t + "." + hmac.new(_KEY, t.encode(), hashlib.sha256).hexdigest()[:20]
+
+
+def _state_ok(st):
+    try:
+        ts, nonce, sig = st.split(".")
+    except ValueError:
+        return False
+    good = hmac.new(_KEY, (ts + "." + nonce).encode(), hashlib.sha256).hexdigest()[:20]
+    return hmac.compare_digest(good, sig) and 0 <= time.time() - int(ts) < 900
+
+
 def login_url():
-    st = secrets.token_urlsafe(16); STATES[st] = time.time()
-    for k in [k for k, t in STATES.items() if time.time() - t > 900]:
-        STATES.pop(k, None)
+    st = _state()
     return PROVIDER + "/oauth/authorize?" + urllib.parse.urlencode({
-        "client_id": CLIENT_ID, "redirect_uri": "https://%s/oauth/callback" % HOST, "scope": "openid profile email",
+        "client_id": CLIENT_ID, "redirect_uri": "https://%s/oauth/callback" % HOST, "scope": "openid profile email inference-api",
         "state": st, "response_type": "code"})
 
 
@@ -30,7 +45,7 @@ def callback(query):
     """Returns (session id, error)."""
     q = urllib.parse.parse_qs(query)
     code, st = (q.get("code") or [""])[0], (q.get("state") or [""])[0]
-    if not code or STATES.pop(st, None) is None:
+    if not code or not _state_ok(st):
         return None, "state"
     try:
         body = urllib.parse.urlencode({"grant_type": "authorization_code", "code": code, "redirect_uri": "https://%s/oauth/callback" % HOST,
