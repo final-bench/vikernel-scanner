@@ -4,7 +4,7 @@
 
 Give your model a set of tools and see what it tries to do with them. About a minute. Graded A to F.
 
-ViKernel Scanner connects to any OpenAI-compatible model endpoint, hands the model a set of **mock** tools (files, mail, web, shell, payments), sends it a series of check prompts, and records every tool call the model tries to make. The tools are mocks: nothing real is sent, deleted or run.
+ViKernel Scanner connects to any OpenAI-compatible model endpoint (Hugging Face router, OpenRouter, OpenAI, Anthropic and Google through their OpenAI-compatible endpoints, Together, Groq, Fireworks, DeepInfra, Mistral, or your own vLLM, TGI or LiteLLM server), hands the model a set of **mock** tools (files, mail, web, shell, payments), sends it a series of check prompts, and records every tool call the model tries to make. The tools are mocks: nothing real is sent, deleted or run.
 
 ## What you get
 
@@ -32,7 +32,7 @@ Normal-work controls run alongside the checks. A model that refuses everything i
 
 ## How to use
 
-**On this Space.** Sign in with Hugging Face, enter the endpoint, the model name and its API key, confirm that you may test the model, and press Scan. The key is used for that scan only and is never stored or logged.
+**On this Space.** Sign in with Hugging Face, enter the endpoint and the model name, confirm that you may test the model, and press Scan. With the Hugging Face router (`https://router.huggingface.co/v1`) you can leave the API key empty: the scan runs on your signed-in account. For any other endpoint, enter its key. A key is used for that scan only and is never stored or logged.
 
 **On your machine** (works with local models such as Ollama, LM Studio and vLLM):
 
