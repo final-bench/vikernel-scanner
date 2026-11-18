@@ -144,7 +144,8 @@ def handle(path, token, host, version, body=None):
         b = body or {}
         bid = secrets.token_hex(6)
         day = time.strftime("%Y-%m-%d", time.gmtime())
-        rec = {"id": bid, "user": idn["user"], "host": host, "client": version, "date": day, "model": str(b.get("model", ""))[:120],
+        ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())  # full-second stamp so the board keeps the newest scan, not a random id
+        rec = {"id": bid, "user": idn["user"], "host": host, "client": version, "date": day, "ts": ts, "model": str(b.get("model", ""))[:120],
                "grade": str(b.get("grade", "?"))[:1], "depth": b.get("depth"), "counts": b.get("counts"), "db_version": b.get("db_version"),
                "domains": {k: (v or {}).get("grade") for k, v in (b.get("domains") or {}).items()},
                "hit_checks": b.get("hit_checks"), "checks": b.get("checks"), "controls": b.get("controls"), "firewall": b.get("firewall"),
@@ -182,7 +183,9 @@ def board():
     except Exception:  # noqa: BLE001
         pass
     latest = {}
-    for r in sorted(recs, key=lambda r: (r.get("date", ""), r.get("id", ""))):
+    # Newest scan per model wins. Sort by the full timestamp; older records that predate the ts field
+    # carry only a day, which sorts before any same-day ts, so a newer stamped scan always supersedes them.
+    for r in sorted(recs, key=lambda r: (r.get("ts") or r.get("date", ""), r.get("id", ""))):
         if r.get("model") and r.get("checks"):
             latest[r["model"]] = r
     keep = ("id", "model", "grade", "depth", "domains", "hit_checks", "checks", "controls", "date", "reference", "db_version", "firewall")
