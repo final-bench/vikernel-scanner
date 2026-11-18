@@ -7,7 +7,7 @@ import concurrent.futures as cf, ipaddress, json, os, re, socket, threading, tim
 
 from . import mockenv
 
-VERSION = "0.4.0"
+VERSION = "0.4.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 DOMAINS = {
@@ -228,7 +228,8 @@ def run_scan(target, checkset, on_event=None, with_controls=True, workers=None):
             emit({"type": "done", "i": n, "n": total, "id": item["id"], "stage": 0, "title": ("Normal work", "정상 업무")})
             return ("control", idx, {"id": item["id"], "ok": ok})
         stage, marked, reply_leak = judge(item, calls, final)
-        row = {"id": item["id"], "domain": item["domain"], "title": item["title"], "prompt": item["prompt"],
+        row = {"id": item["id"], "domain": item["domain"], "title": item["title"], "prompt": item["prompt"], "rule": item.get("rule"),
+               "family": item.get("family"), "transform": item.get("transform"),
                "planted": (item.get("files") or {}).get(item.get("own", ""), "") if item["rule"] == "planted" else "",
                "stage": stage, "calls": marked, "final": final[:600], "reply_leak": reply_leak, "t": round(time.time() - t0, 1), "n": n}
         emit({"type": "done", "i": n, "n": total, "id": item["id"], "stage": stage, "title": item["title"]})
@@ -251,11 +252,17 @@ def run_scan(target, checkset, on_event=None, with_controls=True, workers=None):
     after_rows = [{"domain": r["domain"], "stage": max([c["stage"] for c in r["calls"] if c["stage"] and not c["firewall"]] + [1 if r["reply_leak"] else 0])} for r in rows]
     after = max([GRADE_OF_STAGE[v["stage"]] for v in grade(after_rows).values() if v.get("covered")] or ["A"])
     counts = {STAGES[s][0]: sum(1 for r in rows if r["stage"] == s) for s in (4, 3, 2, 1)}
-    scenes = sorted([r for r in rows if r["stage"]], key=lambda r: (-r["stage"], r["t"]))[:3]
+    scenes, seen = [], set()
+    for r in sorted([r for r in rows if r["stage"]], key=lambda r: (-r["stage"], r["t"])):  # one scene per kind of attack
+        k = r.get("family") or r["id"]
+        if k not in seen:
+            seen.add(k); scenes.append(r)
+        if len(scenes) == 6:
+            break
     return {
         "version": VERSION, "db_version": checkset.get("version"), "model": target.model, "seconds": round(time.time() - t0, 1), "model_calls": target.calls,
         "grade": max([d["grade"] for d in doms.values() if d.get("covered")] or ["A"]), "depth": depth, "counts": counts,
-        "domains": doms, "first": first, "scenes": scenes, "probes": [{k: r[k] for k in ("id", "domain", "title", "stage")} for r in rows],
+        "domains": doms, "first": first, "scenes": scenes, "hit_checks": sum(1 for r in rows if r["stage"]), "probes": [{k: r[k] for k in ("id", "domain", "title", "stage")} for r in rows],
         "controls": {"passed": sum(c["ok"] for c in ctrl), "total": len(ctrl)},
         "firewall": {"hits": len(hits), "blocked": len(blocked), "grade_after": after,
                      "reasons": {k: sum(1 for c in blocked if c["firewall"] == k) for k in ("allowlist", "secret", "scope")}},
