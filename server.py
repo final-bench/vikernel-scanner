@@ -3,7 +3,7 @@
 Sign-in with Hugging Face is required to scan. The check set comes from the ViKernel master for every scan.
 The model's API key is used only for that scan. It stays in memory and is never stored or logged.
 """
-import html, json, os, secrets, threading, time, urllib.request
+import html, json, os, secrets, threading, time, urllib.parse, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import auth
@@ -17,6 +17,7 @@ ALLOW_PRIVATE = os.environ.get("ALLOW_PRIVATE_TARGETS", "") == "1"  # only for a
 CAUSES_URL = os.environ.get("CAUSES_URL", "https://final-bench-vikernel-redteam.hf.space/api/rt/leaderboard")
 JOBS, HITS, LOCK = {}, {}, threading.Lock()
 _causes = {"t": 0, "v": []}
+_catalog = {}
 GRADE_COLOR = {"A": "#22C55E", "B": "#84CC16", "C": "#F59E0B", "D": "#F97316", "F": "#EF4444"}
 
 
@@ -51,7 +52,8 @@ def run_job(jid, token, base_url, model, key):
         engine.check_target(base_url, allow_private=ALLOW_PRIVATE)
         checkset, policy = master_client.get_checkset(token)
         job["notice"] = (policy or {}).get("notice")
-        target = engine.Target(base_url, model, key)
+        hf_router = urllib.parse.urlparse(base_url).hostname in ("router.huggingface.co", "api-inference.huggingface.co")
+        target = engine.Target(base_url, model, key or (token if hf_router else ""))  # HF router without a key: run on the signed-in account
 
         def on_event(e):
             job["events"].append(e); job["progress"] = (e["i"] - (1 if e["type"] == "start" else 0), e["n"])
@@ -59,7 +61,12 @@ def run_job(jid, token, base_url, model, key):
         rep["badge"] = master_client.report(token, {k: rep.get(k) for k in ("model", "grade", "depth", "counts", "domains", "db_version", "version")})
         job["report"] = rep; job["status"] = "done"
     except Exception as e:  # noqa: BLE001
-        job["status"] = "error"; job["error"] = str(e)[:240]
+        msg = str(e)[:240]
+        if "402" in msg:
+            msg += " | This Hugging Face account has no inference credit. Sign in with an account that has credit, or enter a key for another endpoint."
+        elif "401" in msg or "403" in msg:
+            msg += " | The model endpoint refused the key. For the Hugging Face router, sign out and sign in again (the sign-in now includes model access), or enter your own token."
+        job["status"] = "error"; job["error"] = msg
     finally:
         job["ended"] = time.time()
 
@@ -112,8 +119,13 @@ class H(BaseHTTPRequestHandler):
             if not job:
                 return self._send(404, {"error": "unknown scan"})
             return self._send(200, {k: job.get(k) for k in ("status", "progress", "error", "report", "notice")} | {"events": job["events"][-12:]})
-        if p == "/api/master/checks" and master.ENABLED:
+        if p in ("/api/master/checks", "/api/master/catalog") and master.ENABLED:
             return self._master(p)
+        if p == "/api/catalog":
+            c = _catalog.get("v") if time.time() - _catalog.get("t", 0) < 300 else None
+            if c is None:
+                c = master_client.catalog(); _catalog.update(v=c, t=time.time())
+            return self._send(200 if c else 503, c or {"error": "catalog unavailable"})
         if p.startswith("/badge/") and p.endswith(".svg") and master.ENABLED:
             return self._send(200, badge_svg(master.badge(p[7:-4])).encode(), "image/svg+xml", {"Cache-Control": "max-age=3600"})
         self._send(404, {"error": "not found"})
@@ -135,8 +147,8 @@ class H(BaseHTTPRequestHandler):
         if not s:
             return self._send(401, {"error": "Sign in with Hugging Face first.", "login": True})
         base, model, key = str(req.get("base_url", "")).strip(), str(req.get("model", "")).strip(), str(req.get("api_key", "")).strip()
-        if not base or not model or not req.get("consent"):
-            return self._send(400, {"error": "Endpoint, model name and the confirmation are required."})
+        if not base or not req.get("consent"):
+            return self._send(400, {"error": "Endpoint and the confirmation are required."})
         ip, now = self._ip(), time.time()
         with LOCK:
             for k in [k for k, j in JOBS.items() if j.get("ended") and now - j["ended"] > 1800]:
