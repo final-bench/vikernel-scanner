@@ -125,6 +125,11 @@ def _gate(token, host, version):
 
 def handle(path, token, host, version, body=None):
     """Returns a JSON-able dict. Raises Refuse(code, message)."""
+    if path == "/api/master/catalog":  # public: what is checked, without the check text
+        db = _load_db(); cs = db["free"]
+        pol = db["policy"]
+        return {"db_version": cs.get("version"), "controls": len(cs.get("controls", [])), "inventory": pol.get("inventory"),
+                "checks": [{k: c.get(k) for k in ("id", "domain", "stage", "rule", "title")} for c in cs.get("checks", [])]}
     if path == "/api/master/checks":
         db, pol, idn = _gate(token, host, version)
         rec = _record_user(idn, host, version)
