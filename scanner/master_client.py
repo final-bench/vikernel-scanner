@@ -46,6 +46,14 @@ def _call(path, token, body=None):
         raise MasterError("The ViKernel master is not reachable: %s" % str(e)[:80])
 
 
+def catalog():
+    """Public list of checks (ids, domains, stages, titles). No sign-in needed."""
+    try:
+        return _call("/api/master/catalog", "")
+    except MasterError:
+        return None
+
+
 def get_checkset(token):
     """Returns (checkset, policy). Raises MasterError when the master says no."""
     j = _call("/api/master/checks", token)
