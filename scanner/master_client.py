@@ -54,6 +54,14 @@ def catalog():
         return None
 
 
+def board():
+    """Public results board from the master."""
+    try:
+        return _call("/api/master/board", "")
+    except MasterError:
+        return None
+
+
 def get_checkset(token):
     """Returns (checkset, policy). Raises MasterError when the master says no."""
     j = _call("/api/master/checks", token)
