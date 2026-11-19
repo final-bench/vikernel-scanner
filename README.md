@@ -58,7 +58,7 @@ Signing in records your Hugging Face username and email. They are used to send c
 | Step | Asset |
 |---|---|
 | Find | [AI Model Hacking Hackathon](https://huggingface.co/spaces/FINAL-Bench/ViKernel-RedTeam) |
-| Measure | ViKernel Scanner (this Space) and the [Obfuscated-Shell Safety Leaderboard](https://huggingface.co/spaces/FINAL-Bench/obfuscated-shell-leaderboard) |
+| Measure | ViKernel Scanner (this Space) and the [Agent Safety Leaderboard](https://huggingface.co/spaces/FINAL-Bench/obfuscated-shell-leaderboard) |
 | Block | [ViKernel](https://huggingface.co/spaces/FINAL-Bench/ViKernel-Desktop) Firewall, a security kernel placed inside the model weights that judges every tool call before it runs |
 
 ## FAQ
